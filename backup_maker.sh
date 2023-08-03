@@ -2,14 +2,13 @@
 set -euo pipefail
 
 log_file="$HOME/backup_$(date --iso-8601).log"
-exec > >(tee "$log_file") 2>&1
+exec > >(tee -a "$log_file") 2>&1
 
 # Program that backups data from that computer
 # It uses both restic and borgbackup, and it 
 # stores all files in the HDD and on 
 # the cloud.
 
-# TODO: Create an integrity file, where all the path of all backing up files is saved, in order to compare a restored repository
 # TODO: Create a recovery mode
 # TODO: Check if enough disk space is available for the recovery
 # TODO: Once the recovery is done, check if what is recovered is within the integrity file
@@ -66,8 +65,8 @@ make_borg_backup() {
 
   # Pruning to mantain 7 daily, 4 weekly and 6 montly backups
   write_log "Pruning past backups"
-  BORG_PASSPHRASE="$2" borg prune --verbose --list --glob-archives '{hostname}-*' --show-rc --keep-daily 7 --keep-weekly 4 \
-    --keep-montly 6 "$bk_dir"
+  BORG_PASSPHRASE="$2" borg prune --verbose --list --glob-archives '{hostname}-*' --show-rc --keep-daily=7 --keep-weekly=4 \
+    --keep-monthly=6 "$bk_dir"
 
   # Compacting space in the repository
   write_log "Compacting repository"
@@ -75,45 +74,65 @@ make_borg_backup() {
 
   # Checking integrity of the backup
   write_log "Checking integrity of the repository"
-  BORG_PASSPHRASE="$2" borg check --verbose --max-duration=3600 "$bk_dir"
+  BORG_PASSPHRASE="$2" borg check --verbose "$bk_dir"
 }
 
 make_restic_backup() {
   # Restic can be used to backup either on a HHD and the cloud
   # $1 -> restic repo location
+  # $2 -> restic password
   
   write_log "Backing up with Restic utility"
   local bk_dir="${1}_restic"
 
   # Showing existing snapshots
   write_log "Info about the repository"
-  RESTIC_PASSWORD="$2" restic -r "$bk_dir" snapshots
-  RESTIC_PASSWORD="$2" restic -r "$bk_dir" stats -v
+  RESTIC_PASSWORD="$2" restic -r "$bk_dir" --verbose=2 snapshots
+  RESTIC_PASSWORD="$2" restic -r "$bk_dir" --verbose=2 stats
 
   # Backing up
   write_log "Backing up"
-  RESTIC_PASSWORD="$2" restic -r "$bk_dir" --verbose backup ${DIRS_TO_BACKUP[*]} \
-    --exclude ${EXCLUDE_FIES[*]} --exclude-caches
+  RESTIC_PASSWORD="$2" GOMAXPROCS=6 restic -r "$bk_dir" --verbose=2 backup ${DIRS_TO_BACKUP[*]} \
+    --exclude-file=exclude_files.txt --exclude-caches --one-file-system
+  write_log "Exit status of the backup: $?"
 
   # Pruning to mantain 7 daily, 4 weekly and 6 montly
   write_log "Pruning and compacting repository"
-  RESTIC_PASSWORD="$2" restic -r "$bk_dir" --verbose forget --keep-within-daily 7d --keep-within-weekly 1m --keep-within-monthly 6m\
+  RESTIC_PASSWORD="$2" restic -r "$bk_dir" --verbose=2 forget --keep-within-daily 7d --keep-within-weekly 1m --keep-within-monthly 6m\
     --prune
 
   # Checking integrity of the backup
   write_log "Checking integrity of the repository"
-  RESTIC_PASSWORD="$2" restic -r "$bk_dir" check
+  RESTIC_PASSWORD="$2" restic -r "$bk_dir" --verbose=2 check
+}
+
+restore_restic_repository(){
+  # Restic can be used to backup either on a HHD and the cloud
+  # $1 -> restic repo location
+  # $2 -> restic password
+
+  write_log "Restoring lastest Restic repository"
+
+  local recovery_dir="$HOME/Recovery"
+  mkdir -p "$recovery_dir"
+
+  local bk_dir="${1}_restic"
+
+  restic -r "$bk_dir" restore latest --target "$recovery_dir"
+
+  write_log "Restore done at ${recovery_dir}"
+
 }
 
 clean_files() {
   # Cleaning up the generated files
   for env in ${CONDA_ENVS}; do
-    rm -f "$HOME/${env}.yml"
+    rm -fi "$HOME/${env}.yml"
   done
 
-
-  rm -f "$HOME/installed_packgs.dat" 
-  rm -f "$HOME/installed_packages_snap.txt"
+  rm -fi "$HOME/installed_packgs.dat" 
+  rm -fi "$HOME/installed_packages_snap.txt"
+  rm -fi "$HOME/integrity_file.txt"
 }
 
 count_backup_files() {
@@ -175,7 +194,17 @@ output_packages_environments() {
   write_log "Exported apt packages"
 }
 
+create_integrity_file(){
+  write_log "Creating integrity file"
 
+  rm -f "$HOME/integrity_file.txt"
+
+  for dirs in "${DIRS_TO_BACKUP[@]}"
+  do
+    find "$dirs" -print >> "$HOME/integrity_file.txt"
+  done
+  DIRS_TO_BACKUP+=( "$HOME/integrity_file.txt" )
+}
 
 ################################################################################################
 #                                   BODY OF THE PROGRAM                                        #
@@ -189,11 +218,28 @@ do
       write_log "Selected option: -b"
       DIRS_TO_BACKUP=()
       EXCLUDE_FIES=()
+
+      if [ ! -f dirs_to_backup.txt ]; then
+        write_log "Critical file dirs_to_backup.txt not found on current path, exiting"
+        exit 1
+      fi
+
+      if [ ! -f repository_dir.txt ]; then
+        write_log "Critical file repository_dir.txt not found on current path, exiting"
+        exit 1
+      fi
+
+      if [ ! -f exclude_files.txt ]; then
+        write_log "Critical file rexclude_files.txt not found on current path, exiting"
+        exit 1
+      fi
+
       read_dirs_to_backup
       read_files_to_exclude
       
       output_packages_environments
-      
+      create_integrity_file
+
       write_log "Starting copying files"
       count_backup_files
       
@@ -217,13 +263,13 @@ do
     
     -i|--init)
       write_log "Selected option: -i"
-      read -rp "Enter password for repositories:   " "${BORG_PASSW:-}"
+      read -rsp "Enter password for repos:   " MINE_PASSW
       
       while IFS= read -r repo_dir || [[ -n "$repo_dir" ]]
       do
     
-        init_borg_repo "$repo_dir" "$BORG_PASSW"
-        init_restic_repo "$repo_dir" "$RESTIC_PASSW"
+        init_borg_repo "$repo_dir" "$MINE_PASSW"
+        init_restic_repo "$repo_dir" "$MINE_PASSW"
 
       done < repository_dir.txt
 
@@ -234,6 +280,29 @@ do
       write_log "Selected option: -e"
       export_borg_keys
       export_restic_keys
+      
+      shift
+      ;;
+    
+    -r|--recover)
+      write_log "Starting recovery process"
+      
+      read -rsp "Enter password for repos:   " MINE_PASSW
+      read -rsp "Enter recovery tool [(r)estic/(b)org]:  " rec_engine
+
+      if [[ "$rec_engine" == "r" ]]
+      then
+        restore_restic_repository "$MINE_PASSW"
+      
+      elif [[ "$rec_engine" == "r" ]]
+      then
+        echo "Not yet implemented"
+
+      else
+        write_log "Can't be understood the recovery method"
+
+      fi
+
       shift
       ;;
 
