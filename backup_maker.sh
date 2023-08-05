@@ -9,9 +9,7 @@ exec > >(tee -a "$log_file") 2>&1
 # stores all files in the HDD and on 
 # the cloud.
 
-# TODO: Create a recovery mode
 # TODO: Check if enough disk space is available for the recovery
-# TODO: Once the recovery is done, check if what is recovered is within the integrity file
 # TODO: Create a mount ofption to mount existing repositories
 
 write_log(){
@@ -176,6 +174,45 @@ restore_borg_repository(){
 
 }
 
+mount_restic_repository(){
+  
+  local tmpdir_loc
+  tmpdir_loc="$(mktemp -d -t)"
+
+  write_log "Creating a mounting point at ${tmpdir_loc} for the Restic repository"
+
+  RESTIC_PASSWORD="$2" restic -r "$1" mount "${tmpdir_loc}"
+  local pid_restic="$!"
+
+  read -rsp "Hit 'kill' to terminate the process"
+
+  kill -INT $pid_restic
+
+  rm -r "${tmpdir_loc}"
+
+  write_log "Unmount succesfully done"
+
+}
+
+mount_borg_repository(){
+
+  local tmpdir_loc
+  tmpdir_loc="$(mktemp -d -t)"
+
+  write_log "Creating a mounting point at ${tmpdir_loc} for the BorgBackup repository"
+
+  BORG_PASSPHRASE="$2" borg mount -o ignore_permissions  "$1" "$tmpdir_loc"
+
+  read -rsp "Hit 'kill' to terminate the process"
+
+  BORG_PASSPHRASE="$2" borg unmount "$tmpdir_loc"
+
+  rm -r "$tmpdir_loc"
+
+  write_log "Unmount succesfully done"
+
+}
+
 clean_files() {
   # Cleaning up the generated files
   for env in ${CONDA_ENVS}; do
@@ -220,8 +257,6 @@ output_packages_environments() {
 
   # Read conda environments packages to be able to install in the future
   CONDA_ENVS="$(conda env list | tail -n +3 | awk '{print $1}')"
-
-  write_log "Retrived conda environments, exporting them"
 
   for env in "${CONDA_ENVS[@]}"; do
     if [[ "$env" =~ base ]]
@@ -358,6 +393,29 @@ do
 
       shift
       ;;
+
+    -m|--mount)
+      write_log "Starting mounting process"
+
+      read -rsp "Enter password for repos:               " MINE_PASSW
+      read -rsp "Enter recovery tool [(r)estic/(b)org]:  " rec_engine
+      read -rsp "Enter the repository location:          " repo_dir
+
+      if [[ "$rec_engine" == "r" ]]
+      then
+        mount_restic_repository "$repo_dir" "$MINE_PASSW"
+      
+      elif [[ "$rec_engine" == "r" ]]
+      then
+        mount_borg_repository "$repo_dir" "$MINE_PASSW"
+
+      else
+        write_log "Can't be understood the recovery method"
+
+      fi
+
+    shift
+    ;;
 
     -*)
       echo "Unknown option $1"
