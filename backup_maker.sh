@@ -114,11 +114,63 @@ restore_restic_repository(){
   write_log "Restoring lastest Restic repository"
 
   local recovery_dir="$HOME/Recovery"
-  mkdir -p "$recovery_dir"
+
+  if [ ! -d "$recovery_dir" ]
+  then
+    mkdir -p "$recovery_dir"
+  fi
 
   local bk_dir="${1}_restic"
 
-  restic -r "$bk_dir" restore latest --target "$recovery_dir"
+  RESTIC_PASSWORD="$2" restic -r "$bk_dir" restore latest --target "$recovery_dir"
+
+  TMPDIR_LOC="$(mktemp -d -t)" || write_log "Temporary directory can't be created, exiting without testing integrity of the directory"
+
+  find "$bk_dir" -print > "${TMPDIR_LOC}/restored_integrity_file.txt"
+
+  grep -vxFf "$recovery_dir/integrity_file.txt" "${TMPDIR_LOC}/restored_integrity_file.txt" > "$recovery_dir"/test_integrity1.txt
+
+  diff -aytiEZbwB --suppress-common-lines "$recovery_dir/integrity_file.txt" "${TMPDIR_LOC}/restored_integrity_file.txt" > "$recovery_dir"/test_integrity2.txt
+
+  rm -r "${TMPDIR_LOC}"
+
+  write_log "Restore done at ${recovery_dir}"
+
+}
+
+restore_borg_repository(){
+  # Restic can be used to backup either on a HHD and the cloud
+  # $1 -> borg repo location
+  # $2 -> borg password
+
+  write_log "Restoring lastest BorgBackup repository"
+
+  local recovery_dir="$HOME/Recovery"
+
+  if [ ! -d "$recovery_dir" ]
+  then
+    mkdir -p "$recovery_dir"
+  fi
+
+  local bk_dir="${1}_borg"
+
+  cd "$recovery_dir"
+
+  BORG_PASSPHRASE="$2" borg list "$1"
+
+  read -rsp "Enter name of the lastest borg archive: " borg_last_archive
+
+  BORG_PASSPHRASE="$2" borg --list extract "$1"::"$borg_last_archive"
+
+  TMPDIR_LOC="$(mktemp -d -t)" || write_log "Temporary directory can't be created, exiting without testing integrity of the directory"
+
+  find "$bk_dir" -print > "${TMPDIR_LOC}/restored_integrity_file.txt"
+
+  grep -vxFf "$recovery_dir/integrity_file.txt" "${TMPDIR_LOC}/restored_integrity_file.txt" > "$recovery_dir"/test_integrity1.txt
+
+  diff -aytiEZbwB --suppress-common-lines "$recovery_dir/integrity_file.txt" "${TMPDIR_LOC}/restored_integrity_file.txt" > "$recovery_dir"/test_integrity2.txt
+
+  rm -r "${TMPDIR_LOC}"
 
   write_log "Restore done at ${recovery_dir}"
 
@@ -127,12 +179,12 @@ restore_restic_repository(){
 clean_files() {
   # Cleaning up the generated files
   for env in ${CONDA_ENVS}; do
-    rm -fi "$HOME/${env}.yml"
+    rm -f "$HOME/${env}.yml"
   done
 
-  rm -fi "$HOME/installed_packgs.dat" 
-  rm -fi "$HOME/installed_packages_snap.txt"
-  rm -fi "$HOME/integrity_file.txt"
+  rm -f "$HOME/installed_packgs.dat" 
+  rm -f "$HOME/installed_packages_snap.txt"
+  rm -f "$HOME/integrity_file.txt"
 }
 
 count_backup_files() {
@@ -287,16 +339,17 @@ do
     -r|--recover)
       write_log "Starting recovery process"
       
-      read -rsp "Enter password for repos:   " MINE_PASSW
+      read -rsp "Enter password for repos:               " MINE_PASSW
       read -rsp "Enter recovery tool [(r)estic/(b)org]:  " rec_engine
+      read -rsp "Enter the repository location:          " repo_dir
 
       if [[ "$rec_engine" == "r" ]]
       then
-        restore_restic_repository "$MINE_PASSW"
+        restore_restic_repository "$repo_dir" "$MINE_PASSW"
       
       elif [[ "$rec_engine" == "r" ]]
       then
-        echo "Not yet implemented"
+        restore_borg_repository "$repo_dir" "$MINE_PASSW"
 
       else
         write_log "Can't be understood the recovery method"
