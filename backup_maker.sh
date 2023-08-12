@@ -293,6 +293,15 @@ create_integrity_file(){
   DIRS_TO_BACKUP+=( "$HOME/integrity_file.txt" )
 }
 
+show_help(){
+  echo "./backup_maker.sh: [-b] [-i] [-e] [-r] [-m]"
+  echo "  -b: Perform a backup"
+  echo "  -i: Initialize a new repository"
+  echo "  -e: Export repository keys"
+  echo "  -r: Recover from an specific repository"
+  echo "  -m: Mount a repository"
+}
+
 ################################################################################################
 #                                   BODY OF THE PROGRAM                                        #
 ################################################################################################
@@ -416,8 +425,14 @@ do
 
       fi
 
-    shift
-    ;;
+      shift
+      ;;
+    
+    -h|--help)
+      show_help
+
+      shift
+      ;;
 
     -*)
       echo "Unknown option $1"
