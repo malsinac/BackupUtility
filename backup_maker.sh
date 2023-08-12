@@ -181,7 +181,7 @@ mount_restic_repository(){
 
   write_log "Creating a mounting point at ${tmpdir_loc} for the Restic repository"
 
-  RESTIC_PASSWORD="$2" restic -r "$1" mount "${tmpdir_loc}"
+  RESTIC_PASSWORD="$2" restic -r "$1" mount "${tmpdir_loc}" &
   local pid_restic="$!"
 
   read -rsp "Hit 'kill' to terminate the process"
@@ -205,7 +205,7 @@ mount_borg_repository(){
 
   read -rsp "Hit 'kill' to terminate the process"
 
-  BORG_PASSPHRASE="$2" borg unmount "$tmpdir_loc"
+  BORG_PASSPHRASE="$2" borg umount "$tmpdir_loc"
 
   rm -r "$tmpdir_loc"
 
@@ -398,14 +398,16 @@ do
       write_log "Starting mounting process"
 
       read -rsp "Enter password for repos:               " MINE_PASSW
-      read -rsp "Enter recovery tool [(r)estic/(b)org]:  " rec_engine
-      read -rsp "Enter the repository location:          " repo_dir
+      echo ""
+      read -rp "Enter recovery tool [(r)estic/(b)org]:  " rec_engine
+      echo ""
+      read -rp "Enter the repository location:          " repo_dir
 
       if [[ "$rec_engine" == "r" ]]
       then
         mount_restic_repository "$repo_dir" "$MINE_PASSW"
       
-      elif [[ "$rec_engine" == "r" ]]
+      elif [[ "$rec_engine" == "b" ]]
       then
         mount_borg_repository "$repo_dir" "$MINE_PASSW"
 
