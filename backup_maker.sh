@@ -10,7 +10,6 @@ exec > >(tee -a "$log_file") 2>&1
 # the cloud.
 
 # TODO: Check if enough disk space is available for the recovery
-# TODO: Create a mount ofption to mount existing repositories
 
 write_log(){
   echo "[$(date)]  $1"
@@ -58,7 +57,7 @@ make_borg_backup() {
 
   # Making the backup
   write_log "Backing up"
-  BORG_PASSPHRASE="$2" borg create --verbose --list --stats --progress --show-rc --compression zlib,6 --exclude-caches \
+  BORG_PASSPHRASE="$2" borg create --verbose --list --stats --progress --show-rc --compression zlib,6 --exclude-caches --exclude-from exclude_files.txt \
      "$bk_dir"::'{hostname}-{now}' ${DIRS_TO_BACKUP[*]}
 
   # Pruning to mantain 7 daily, 4 weekly and 6 montly backups
@@ -84,8 +83,10 @@ make_restic_backup() {
   local bk_dir="${1}_restic"
 
   # Showing existing snapshots
-  write_log "Info about the repository"
+  write_log "--Info about the repository--"
+  write_log "Snapshots:"
   RESTIC_PASSWORD="$2" restic -r "$bk_dir" --verbose=2 snapshots
+  write_log "Statistics:"
   RESTIC_PASSWORD="$2" restic -r "$bk_dir" --verbose=2 stats
 
   # Backing up
@@ -219,6 +220,7 @@ clean_files() {
     rm -f "$HOME/${env}.yml"
   done
 
+  rm -f "$HOME/manual_installed_packgs.dat"
   rm -f "$HOME/installed_packgs.dat" 
   rm -f "$HOME/installed_packages_snap.txt"
   rm -f "$HOME/integrity_file.txt"
@@ -274,6 +276,9 @@ output_packages_environments() {
   # Outputting installed packages
   apt list > "$HOME"/installed_packgs.dat
   DIRS_TO_BACKUP+=( "$HOME/installed_packgs.dat" )
+
+  apt list --manual-installed --verbose > "$HOME"/manual_installed_packgs.dat
+  DIRS_TO_BACKUP+=( "$HOME/manual_installed_packgs.dat" )
 
   snap list > "$HOME"/installed_packages_snap.txt
   DIRS_TO_BACKUP+=( "$HOME/installed_packages_snap.txt" )
@@ -406,7 +411,7 @@ do
     -m|--mount)
       write_log "Starting mounting process"
 
-      read -rsp "Enter password for repos:               " MINE_PASSW
+      read -rsp "Enter password for repos:              " MINE_PASSW
       echo ""
       read -rp "Enter recovery tool [(r)estic/(b)org]:  " rec_engine
       echo ""
@@ -430,8 +435,8 @@ do
     
     -h|--help)
       show_help
+      exit 0
 
-      shift
       ;;
 
     -*)
